@@ -14,7 +14,7 @@
 
 using namespace Microsoft::WRL;
 
-const UINT imageWidth = 990;
+const UINT imageWidth = 1060;
 const UINT imageHeight = 1100;
 const INT32 totalForecasts = 10;
 
@@ -52,6 +52,44 @@ std::wstring GetTextForecast(int index)
     return buffer;
 }
 
+HRESULT LoadBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, std::wstring path, IWICBitmap** ppWICBitmap)
+{
+    ComPtr<ID2D1RenderTarget> pRenderTarget;
+    ComPtr<IWICFormatConverter> pConverter;
+    ComPtr<IWICBitmapDecoder> pDecoder;
+    ComPtr<IWICBitmapFrameDecode> pSource;
+    ComPtr<ID2D1Bitmap> pD2DBitmap;
+
+    HRESULT hr = pWICFactory->CreateDecoderFromFilename(path.c_str(), NULL, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &pDecoder);
+    if (SUCCEEDED(hr))
+        hr = pDecoder->GetFrame(0, &pSource);
+
+    if (SUCCEEDED(hr))
+        hr = pWICFactory->CreateFormatConverter(&pConverter);
+
+    if (SUCCEEDED(hr))
+        hr = pConverter->Initialize(pSource.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, NULL, 0.f, WICBitmapPaletteTypeMedianCut);    
+    
+    if (SUCCEEDED(hr))
+        hr = pWICFactory->CreateBitmap(imageWidth, imageHeight, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, ppWICBitmap);
+
+    if (SUCCEEDED(hr))
+        hr = pD2DFactory->CreateWicBitmapRenderTarget(*ppWICBitmap, D2D1::RenderTargetProperties(), &pRenderTarget);
+
+    if (SUCCEEDED(hr))
+        hr = pRenderTarget->CreateBitmapFromWicBitmap(pConverter.Get(), &pD2DBitmap);
+   
+    if (SUCCEEDED(hr))
+    {
+        pRenderTarget->BeginDraw();
+        pRenderTarget->Clear(D2D1::ColorF(53 / 255.0f, 56 / 255.0f, 62 / 255.0f));
+        pRenderTarget->DrawBitmap(pD2DBitmap.Get(), D2D1::RectF(0, 0, 1060, 1060), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1::RectF(0, 0, 1060, 1060));
+        pRenderTarget->EndDraw();
+    }
+
+    return hr;
+}
+
 HRESULT RenderForecastBitmap(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IWICBitmap** ppWICBitmap, int32_t forecastIndex)
 {
     ComPtr<ID2D1RenderTarget> pRenderTarget;
@@ -73,17 +111,14 @@ HRESULT RenderForecastBitmap(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2D
 
     if (SUCCEEDED(hr))
         pRenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+
     if (SUCCEEDED(hr))
+    {
         pRenderTarget->BeginDraw();
-    
-    if (SUCCEEDED(hr))
         pRenderTarget->Clear(D2D1::ColorF(53 / 255.0f, 56 / 255.0f, 62 / 255.0f));
-
-    if (SUCCEEDED(hr))
-        pRenderTarget->DrawText(forecast.c_str(), (UINT32)forecast.length(), pTextFormat.Get(), D2D1::RectF(0, 0, imageWidth, imageHeight), pWhiteBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-
-    if (SUCCEEDED(hr))
+        pRenderTarget->DrawText(forecast.c_str(), (UINT32)forecast.length(), pTextFormat.Get(), D2D1::RectF(40, 0, imageWidth, imageHeight), pWhiteBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
         pRenderTarget->EndDraw();
+    }
 
     return hr;
 }
@@ -216,9 +251,8 @@ HRESULT InitializeSinkWriter(IMFSinkWriter** ppSinkWriter, DWORD* pStreamIndex, 
     return hr;
 }
 
-HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, DWORD streamIndex, INT32 forecastIndex, INT32 frameDuration, LONGLONG& rtStart)
+HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, DWORD streamIndex, IWICBitmap* pWICBitmap, INT32 frameDuration, LONGLONG& rtStart)
 {
-    ComPtr<IWICBitmap> pWICBitmap;
     ComPtr<IWICBitmapLock> pILock;
     ComPtr<IMFMediaBuffer> pBuffer;
     ComPtr<IWICBitmapFlipRotator> pFlipRotator;
@@ -234,11 +268,9 @@ HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory*
 
     HRESULT hr = MFCreateMemoryBuffer(cbBuffer, &pBuffer);
     if (SUCCEEDED(hr))
-        hr = RenderForecastBitmap(pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, forecastIndex);    
-    if (SUCCEEDED(hr))
         hr = pWICFactory->CreateBitmapFlipRotator(&pFlipRotator);
     if (SUCCEEDED(hr))
-        hr = pFlipRotator->Initialize(pWICBitmap.Get(), WICBitmapTransformFlipVertical);
+        hr = pFlipRotator->Initialize(pWICBitmap, WICBitmapTransformFlipVertical);
     if (SUCCEEDED(hr))
         hr = pWICFactory->CreateBitmapFromSourceRect(pFlipRotator.Get(), 0, 0, imageWidth, imageHeight, &pWICFlippedBitmap);
     if (SUCCEEDED(hr))
@@ -279,20 +311,33 @@ HRESULT RenderVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DF
 {
     const VideoFps fps = {1, 5};
     const UINT64 frameDuration = (UINT64)(10 * 1000 * 1000 / 0.2);
-    HRESULT hr = MFStartup(MF_VERSION);
     ComPtr<IMFSinkWriter> pSinkWriter;
+    LONGLONG rtStart = 0;
     DWORD stream;
+    HRESULT hr = MFStartup(MF_VERSION);
 
     if (SUCCEEDED(hr))
         hr = InitializeSinkWriter(&pSinkWriter, &stream, fps, frameDuration);
 
     if (SUCCEEDED(hr))
     {
-        LONGLONG rtStart = 0;
+        ComPtr<IWICBitmap> pWICBitmap;
+        hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, L"./renderings/wx.png", &pWICBitmap);
 
+        if (SUCCEEDED(hr))
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, pWICBitmap.Get(), frameDuration, rtStart);
+    }
+
+    if (SUCCEEDED(hr))
+    {
         for (auto forecastIndex = 0; forecastIndex < totalForecasts; forecastIndex++)
         {
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, forecastIndex, frameDuration, rtStart);
+            ComPtr<IWICBitmap> pWICBitmap;
+            hr = RenderForecastBitmap(pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, forecastIndex);
+            if (FAILED(hr))
+                break;
+
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, pWICBitmap.Get(), frameDuration, rtStart);
             if (FAILED(hr))            
                 break;
         }
