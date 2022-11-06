@@ -33,13 +33,17 @@ struct VideoFps {
     UINT32 denominator;
 };
 
-std::wstring GetTextForecast(int index)
+#define INCREMENT_AND_TEST(i, len) i++; \
+if(i == len) \
+    break;
+
+std::wstring GetTextForecast(std::wstring pathToRenderingsFolder, int index)
 {
     FILE* f;
-    char cFileName[64] = { 0 };
-    sprintf_s(cFileName, "./renderings/%02d.txt", index);
+    wchar_t cFileName[MAX_PATH] = { 0 };
+    swprintf_s(cFileName, L"%s/%02d.txt", pathToRenderingsFolder.c_str(), index);
 
-    fopen_s(&f, cFileName, "r, ccs=UTF-8");
+    _wfopen_s(&f, cFileName, L"r, ccs=UTF-8");
     if (f == NULL)
         return std::wstring();
 
@@ -90,14 +94,14 @@ HRESULT LoadBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFa
     return hr;
 }
 
-HRESULT RenderForecastBitmap(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IWICBitmap** ppWICBitmap, int32_t forecastIndex)
+HRESULT RenderForecastBitmap(std::wstring pathToRenderingsFolder, IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IWICBitmap** ppWICBitmap, int32_t forecastIndex)
 {
     ComPtr<ID2D1RenderTarget> pRenderTarget;
     ComPtr<ID2D1SolidColorBrush> pWhiteBrush;
     ComPtr<IDWriteTextFormat> pTextFormat;            
     ComPtr<IWICMetadataQueryWriter> pMetadataQueryWriter;
 
-    auto forecast = GetTextForecast(forecastIndex);
+    auto forecast = GetTextForecast(pathToRenderingsFolder, forecastIndex);
     HRESULT hr = pWICFactory->CreateBitmap(imageWidth, imageHeight, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, ppWICBitmap);
 
     if (SUCCEEDED(hr))
@@ -123,10 +127,9 @@ HRESULT RenderForecastBitmap(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2D
     return hr;
 }
 
-HRESULT RenderGifForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
+HRESULT RenderGifForecast(std::wstring pathToGifOutput, std::wstring pathToRenderingsFolder, IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
 {
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
-    static const WCHAR filename[] = L"output.gif";
     ComPtr<IWICStream> pStream;
     ComPtr<IWICBitmapEncoder> pEncoder;
     ComPtr<IWICMetadataQueryWriter> pMetadataQueryWriter;
@@ -134,7 +137,7 @@ HRESULT RenderGifForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFac
 
     HRESULT hr = pWICFactory->CreateStream(&pStream);
     if (SUCCEEDED(hr))
-        hr = pStream->InitializeFromFilename(filename, GENERIC_WRITE);
+        hr = pStream->InitializeFromFilename(pathToGifOutput.c_str(), GENERIC_WRITE);
     if (SUCCEEDED(hr))
         hr = pWICFactory->CreateEncoder(GUID_ContainerFormatGif, NULL, &pEncoder);
     if (SUCCEEDED(hr))
@@ -159,7 +162,7 @@ HRESULT RenderGifForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFac
     if (SUCCEEDED(hr))
         hr = pMetadataQueryWriter->SetMetadataByName(L"/appext/Data", &propValue);    
 
-    for (auto i = 0; i < totalForecasts; i++)
+    for (auto i = -1; i < totalForecasts; i++)
     {
         ComPtr<IWICBitmapFrameEncode> pFrameEncoder;
         ComPtr<IWICBitmap> pWICBitmap;
@@ -173,7 +176,15 @@ HRESULT RenderGifForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFac
             hr = pFrameEncoder->SetPixelFormat(&pixelFormat);
 
         if (SUCCEEDED(hr))
-            hr = RenderForecastBitmap(pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, i);
+        {
+            if (i == -1)
+            {
+                std::wstring wxFile = pathToRenderingsFolder + L"\\wx.png";
+                hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
+            }
+            else
+                hr = RenderForecastBitmap(pathToRenderingsFolder, pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, i);
+        }
 
         if (SUCCEEDED(hr))
             hr = pFrameEncoder->GetMetadataQueryWriter(&pMetadataQueryWriter);
@@ -198,7 +209,7 @@ HRESULT RenderGifForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFac
     return hr;
 }
 
-HRESULT InitializeSinkWriter(IMFSinkWriter** ppSinkWriter, DWORD* pStreamIndex, VideoFps fps, UINT32 frameDuration)
+HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, DWORD* pStreamIndex, VideoFps fps, UINT32 frameDuration)
 {    
     const UINT32 bitRate = 1000000;
     const GUID encodingFormat = MFVideoFormat_H264;
@@ -207,7 +218,7 @@ HRESULT InitializeSinkWriter(IMFSinkWriter** ppSinkWriter, DWORD* pStreamIndex, 
     ComPtr<IMFMediaType> pMediaTypeOut;
     ComPtr<IMFMediaType> pMediaTypeIn;
 
-    HRESULT hr = MFCreateSinkWriterFromURL(L"output.mp4", NULL, NULL, ppSinkWriter);
+    HRESULT hr = MFCreateSinkWriterFromURL(pathToMp4Output.c_str(), NULL, NULL, ppSinkWriter);
 
     if (SUCCEEDED(hr))
         hr = MFCreateMediaType(&pMediaTypeOut);
@@ -307,22 +318,23 @@ HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory*
     return hr;
 }
 
-HRESULT RenderVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
+HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pathToMp4Output, IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
 {
     const VideoFps fps = {1, 5};
-    const UINT64 frameDuration = (UINT64)(10 * 1000 * 1000 / 0.2);
+    const UINT64 frameDuration = (UINT64)(10 * 1000 * 1000 / (fps.numerator / (float)fps.denominator));
     ComPtr<IMFSinkWriter> pSinkWriter;
     LONGLONG rtStart = 0;
     DWORD stream;
     HRESULT hr = MFStartup(MF_VERSION);
 
     if (SUCCEEDED(hr))
-        hr = InitializeSinkWriter(&pSinkWriter, &stream, fps, frameDuration);
+        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &stream, fps, frameDuration);
 
     if (SUCCEEDED(hr))
     {
         ComPtr<IWICBitmap> pWICBitmap;
-        hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, L"./renderings/wx.png", &pWICBitmap);
+        std::wstring wxFile = pathToRenderingsFolder + L"\\wx.png";
+        hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
 
         if (SUCCEEDED(hr))
             hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, pWICBitmap.Get(), frameDuration, rtStart);
@@ -333,7 +345,7 @@ HRESULT RenderVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DF
         for (auto forecastIndex = 0; forecastIndex < totalForecasts; forecastIndex++)
         {
             ComPtr<IWICBitmap> pWICBitmap;
-            hr = RenderForecastBitmap(pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, forecastIndex);
+            hr = RenderForecastBitmap(pathToRenderingsFolder, pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, forecastIndex);
             if (FAILED(hr))
                 break;
 
@@ -352,11 +364,34 @@ HRESULT RenderVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DF
     return hr;
 }
 
-int main(int argc, const char* argv) 
+int wmain(int argc, const wchar_t* argv[])
 {
     ComInstanceController controller;
     if (!controller.Initalized())
         return 1;
+
+    std::wstring pathToRenderingsFolder = L".\\renderings";
+    std::wstring pathToMp4Output = L"output.mp4";
+    std::wstring pathToGifOutput = L"output.gif";
+
+    for (auto i = 0; i < argc; i++) 
+    {
+        if (!wcscmp(L"-r", argv[i])) 
+        {
+            INCREMENT_AND_TEST(i, argc);
+            pathToRenderingsFolder = argv[i];
+        }
+        else if (!wcscmp(L"-m", argv[i]))
+        {
+            INCREMENT_AND_TEST(i, argc);
+            pathToMp4Output = argv[i];
+        }
+        else if (!wcscmp(L"-g", argv[i]))
+        {
+            INCREMENT_AND_TEST(i, argc);
+            pathToGifOutput = argv[i];
+        }
+    }
 
     ComPtr<ID2D1Factory> pD2DFactory;
     ComPtr<IDWriteFactory> pDWriteFactory;    
@@ -369,10 +404,10 @@ int main(int argc, const char* argv)
         hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pWICFactory));
 
     if (SUCCEEDED(hr))
-        hr = RenderVideoForecast(pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());
+        hr = RenderVideoForecast(pathToRenderingsFolder, pathToMp4Output, pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());
 
     /*if (SUCCEEDED(hr))
-        hr = RenderGifForecast(pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());*/
+        hr = RenderGifForecast(pathToGifOutput, pathToRenderingsFolder, pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());*/
 
 	return 0;
 }
