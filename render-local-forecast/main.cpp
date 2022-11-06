@@ -83,7 +83,7 @@ HRESULT LoadBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFa
     {
         pRenderTarget->BeginDraw();
         pRenderTarget->Clear(D2D1::ColorF(53 / 255.0f, 56 / 255.0f, 62 / 255.0f));
-        pRenderTarget->DrawBitmap(pD2DBitmap.Get(), D2D1::RectF(0, 0, 1060, 1060), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1::RectF(0, 0, 1060, 1060));
+        pRenderTarget->DrawBitmap(pD2DBitmap.Get(), D2D1::RectF(0, 40, 1060, 1060), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1::RectF(0, 0, 1060, 1060));
         pRenderTarget->EndDraw();
     }
 
