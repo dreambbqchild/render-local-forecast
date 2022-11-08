@@ -33,6 +33,11 @@ struct VideoFps {
     UINT32 denominator;
 };
 
+struct StreamIndexes {
+    DWORD video;
+    DWORD audio;
+};
+
 #define INCREMENT_AND_TEST(i, len) i++; \
 if(i == len) \
     break;
@@ -120,7 +125,7 @@ HRESULT RenderForecastBitmap(std::wstring pathToRenderingsFolder, IWICImagingFac
     {
         pRenderTarget->BeginDraw();
         pRenderTarget->Clear(D2D1::ColorF(53 / 255.0f, 56 / 255.0f, 62 / 255.0f));
-        pRenderTarget->DrawText(forecast.c_str(), (UINT32)forecast.length(), pTextFormat.Get(), D2D1::RectF(40, 0, imageWidth, imageHeight), pWhiteBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        pRenderTarget->DrawText(forecast.c_str(), (UINT32)forecast.length(), pTextFormat.Get(), D2D1::RectF(12, 0, imageWidth, imageHeight), pWhiteBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
         pRenderTarget->EndDraw();
     }
 
@@ -209,7 +214,7 @@ HRESULT RenderGifForecast(std::wstring pathToGifOutput, std::wstring pathToRende
     return hr;
 }
 
-HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, DWORD* pStreamIndex, VideoFps fps, UINT32 frameDuration)
+HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, StreamIndexes* streamIndex, VideoFps fps, UINT32 frameDuration)
 {    
     const UINT32 bitRate = 1000000;
     const GUID encodingFormat = MFVideoFormat_H264;
@@ -237,7 +242,7 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     if (SUCCEEDED(hr))
         hr = MFSetAttributeRatio(pMediaTypeOut.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     if (SUCCEEDED(hr))
-        hr = (*ppSinkWriter)->AddStream(pMediaTypeOut.Get(), pStreamIndex);
+        hr = (*ppSinkWriter)->AddStream(pMediaTypeOut.Get(), &streamIndex->video);
 
     if (SUCCEEDED(hr))
         hr = MFCreateMediaType(&pMediaTypeIn);
@@ -254,7 +259,7 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     if (SUCCEEDED(hr))
         hr = MFSetAttributeRatio(pMediaTypeIn.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     if (SUCCEEDED(hr))
-        hr = (*ppSinkWriter)->SetInputMediaType(*pStreamIndex, pMediaTypeIn.Get(), NULL);
+        hr = (*ppSinkWriter)->SetInputMediaType(streamIndex->video, pMediaTypeIn.Get(), NULL);
 
     if (SUCCEEDED(hr))
         hr = (*ppSinkWriter)->BeginWriting();
@@ -324,11 +329,11 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
     const UINT64 frameDuration = (UINT64)(10 * 1000 * 1000 / (fps.numerator / (float)fps.denominator));
     ComPtr<IMFSinkWriter> pSinkWriter;
     LONGLONG rtStart = 0;
-    DWORD stream;
+    StreamIndexes streamIndexes = {0};
     HRESULT hr = MFStartup(MF_VERSION);
 
     if (SUCCEEDED(hr))
-        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &stream, fps, frameDuration);
+        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &streamIndexes, fps, frameDuration);
 
     if (SUCCEEDED(hr))
     {
@@ -337,7 +342,7 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
         hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
 
         if (SUCCEEDED(hr))
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, pWICBitmap.Get(), frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), streamIndexes.video, pWICBitmap.Get(), frameDuration, rtStart);
     }
 
     if (SUCCEEDED(hr))
@@ -349,7 +354,7 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
             if (FAILED(hr))
                 break;
 
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), stream, pWICBitmap.Get(), frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), streamIndexes.video, pWICBitmap.Get(), frameDuration, rtStart);
             if (FAILED(hr))            
                 break;
         }
