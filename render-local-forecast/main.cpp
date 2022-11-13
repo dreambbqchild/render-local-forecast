@@ -7,12 +7,15 @@
 #include <mferror.h>
 #include <wrl.h>
 
+#include <fstream>
+#include <filesystem>
+#include <iostream>
+#include <random>
 #include <string>
 #include <vector>
-#include <iostream>
-#include <fstream>
 
 using namespace Microsoft::WRL;
+namespace fs = std::filesystem;
 
 const UINT imageWidth = 1060;
 const UINT imageHeight = 1100;
@@ -59,6 +62,25 @@ std::wstring GetTextForecast(std::wstring pathToRenderingsFolder, int index)
     fread((char*)buffer.c_str(), length, 1, f);
     fclose(f);
     return buffer;
+}
+
+HRESULT SelectRandomMusic(IMFSourceReader** pSourceReader) 
+{
+    std::wstring path(MAX_PATH, '\0');
+    GetModuleFileName(NULL, (wchar_t*)path.c_str(), MAX_PATH);
+    path = fs::path(path).parent_path().parent_path().parent_path();
+    path += L"\\music";
+
+    std::vector<fs::path> files;
+    for (const auto& entry : fs::directory_iterator(path)) 
+        files.push_back(entry.path());
+
+    std::random_device randomDevice;
+    std::default_random_engine randomEngine(randomDevice());
+    std::uniform_int_distribution<int> range(0, files.size());
+    auto index = range(randomEngine);
+
+    return MFCreateSourceReaderFromURL(files.at(index).c_str(), NULL, pSourceReader);
 }
 
 HRESULT LoadBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, std::wstring path, IWICBitmap** ppWICBitmap)
@@ -214,52 +236,84 @@ HRESULT RenderGifForecast(std::wstring pathToGifOutput, std::wstring pathToRende
     return hr;
 }
 
-HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, StreamIndexes* streamIndex, VideoFps fps, UINT32 frameDuration)
+HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, IMFSourceReader** pReader, StreamIndexes* streamIndex, VideoFps fps, UINT32 frameDuration)
 {    
     const UINT32 bitRate = 1000000;
     const GUID encodingFormat = MFVideoFormat_H264;
-    const GUID inputFormat = MFVideoFormat_RGB32;
+    const GUID videoFormat = MFVideoFormat_RGB32;
+    const GUID audioFormat = MFAudioFormat_PCM;
 
-    ComPtr<IMFMediaType> pMediaTypeOut;
-    ComPtr<IMFMediaType> pMediaTypeIn;
+    ComPtr<IMFMediaType> pVideoOut;
+    ComPtr<IMFMediaType> pVideoIn;
+    ComPtr<IMFMediaType> pAudioOut;
+    ComPtr<IMFMediaType> pAudioIn;
 
     HRESULT hr = MFCreateSinkWriterFromURL(pathToMp4Output.c_str(), NULL, NULL, ppSinkWriter);
 
     if (SUCCEEDED(hr))
-        hr = MFCreateMediaType(&pMediaTypeOut);
+        hr = MFCreateMediaType(&pVideoOut);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        hr = pVideoOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeOut->SetGUID(MF_MT_SUBTYPE, encodingFormat);
+        hr = pVideoOut->SetGUID(MF_MT_SUBTYPE, encodingFormat);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeOut->SetUINT32(MF_MT_AVG_BITRATE, bitRate);
+        hr = pVideoOut->SetUINT32(MF_MT_AVG_BITRATE, bitRate);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeOut->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        hr = pVideoOut->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeSize(pMediaTypeOut.Get(), MF_MT_FRAME_SIZE, imageWidth, imageHeight);
+        hr = MFSetAttributeSize(pVideoOut.Get(), MF_MT_FRAME_SIZE, imageWidth, imageHeight);
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeRatio(pMediaTypeOut.Get(), MF_MT_FRAME_RATE, fps.numerator, fps.denominator);
+        hr = MFSetAttributeRatio(pVideoOut.Get(), MF_MT_FRAME_RATE, fps.numerator, fps.denominator);
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeRatio(pMediaTypeOut.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+        hr = MFSetAttributeRatio(pVideoOut.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     if (SUCCEEDED(hr))
-        hr = (*ppSinkWriter)->AddStream(pMediaTypeOut.Get(), &streamIndex->video);
+        hr = (*ppSinkWriter)->AddStream(pVideoOut.Get(), &streamIndex->video);
+
+    ComPtr<IMFMediaType> pSourceAudio;
+    if (SUCCEEDED(hr))
+        hr = SelectRandomMusic(pReader);
+    
+    if (SUCCEEDED(hr))
+        hr = (*pReader)->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pSourceAudio);
 
     if (SUCCEEDED(hr))
-        hr = MFCreateMediaType(&pMediaTypeIn);
+        hr = MFCreateMediaType(&pAudioOut);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        hr = pAudioOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeIn->SetGUID(MF_MT_SUBTYPE, inputFormat);
+        hr = pAudioOut->SetGUID(MF_MT_SUBTYPE, audioFormat);
     if (SUCCEEDED(hr))
-        hr = pMediaTypeIn->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        hr = pSourceAudio->CopyAllItems(pAudioOut.Get());
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeSize(pMediaTypeIn.Get(), MF_MT_FRAME_SIZE, imageWidth, imageHeight);
+        hr = (*ppSinkWriter)->AddStream(pAudioOut.Get(), &streamIndex->audio);
+
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeRatio(pMediaTypeIn.Get(), MF_MT_FRAME_RATE, fps.numerator, fps.denominator);
+        hr = MFCreateMediaType(&pVideoIn);
     if (SUCCEEDED(hr))
-        hr = MFSetAttributeRatio(pMediaTypeIn.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+        hr = pVideoIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     if (SUCCEEDED(hr))
-        hr = (*ppSinkWriter)->SetInputMediaType(streamIndex->video, pMediaTypeIn.Get(), NULL);
+        hr = pVideoIn->SetGUID(MF_MT_SUBTYPE, videoFormat);
+    if (SUCCEEDED(hr))
+        hr = pVideoIn->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+    if (SUCCEEDED(hr))
+        hr = MFSetAttributeSize(pVideoIn.Get(), MF_MT_FRAME_SIZE, imageWidth, imageHeight);
+    if (SUCCEEDED(hr))
+        hr = MFSetAttributeRatio(pVideoIn.Get(), MF_MT_FRAME_RATE, fps.numerator, fps.denominator);
+    if (SUCCEEDED(hr))
+        hr = MFSetAttributeRatio(pVideoIn.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    if (SUCCEEDED(hr))
+        hr = (*ppSinkWriter)->SetInputMediaType(streamIndex->video, pVideoIn.Get(), NULL);
+
+    if (SUCCEEDED(hr))
+        hr = MFCreateMediaType(&pAudioIn);
+    if (SUCCEEDED(hr))
+        hr = pAudioIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    if (SUCCEEDED(hr))
+        hr = pAudioIn->SetGUID(MF_MT_SUBTYPE, audioFormat);
+    if (SUCCEEDED(hr))
+        hr = pSourceAudio->CopyAllItems(pAudioIn.Get());
+    if (SUCCEEDED(hr))
+        hr = (*ppSinkWriter)->SetInputMediaType(streamIndex->audio, pAudioIn.Get(), NULL);
 
     if (SUCCEEDED(hr))
         hr = (*ppSinkWriter)->BeginWriting();
@@ -267,7 +321,7 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     return hr;
 }
 
-HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, DWORD streamIndex, IWICBitmap* pWICBitmap, INT32 frameDuration, LONGLONG& rtStart)
+HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, IWICBitmap* pWICBitmap, IMFSourceReader* pReader, StreamIndexes* streamIndex, INT32 frameDuration, LONGLONG& rtStart)
 {
     ComPtr<IWICBitmapLock> pILock;
     ComPtr<IMFMediaBuffer> pBuffer;
@@ -315,10 +369,23 @@ HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory*
         hr = pSample->SetSampleDuration(frameDuration);
 
     if (SUCCEEDED(hr))
-        hr = pWriter->WriteSample(streamIndex, pSample.Get());
+        hr = pWriter->WriteSample(streamIndex->video, pSample.Get());
 
     if (SUCCEEDED(hr))
         rtStart += frameDuration;
+
+    LONGLONG timestamp = 0;
+    do
+    {
+        DWORD actualIndex, flags;
+        ComPtr<IMFSample> pSrcSample;
+        if (SUCCEEDED(hr))
+            hr = pReader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &actualIndex, &flags, &timestamp, &pSrcSample);
+
+        if (SUCCEEDED(hr))
+            hr = pWriter->WriteSample(streamIndex->audio, pSrcSample.Get());
+    }while (timestamp < rtStart);
+
 
     return hr;
 }
@@ -328,12 +395,13 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
     const VideoFps fps = {1, 5};
     const UINT64 frameDuration = (UINT64)(10 * 1000 * 1000 / (fps.numerator / (float)fps.denominator));
     ComPtr<IMFSinkWriter> pSinkWriter;
+    ComPtr<IMFSourceReader> pReader;
     LONGLONG rtStart = 0;
     StreamIndexes streamIndexes = {0};
     HRESULT hr = MFStartup(MF_VERSION);
 
     if (SUCCEEDED(hr))
-        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &streamIndexes, fps, frameDuration);
+        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &pReader, &streamIndexes, fps, frameDuration);
 
     if (SUCCEEDED(hr))
     {
@@ -342,7 +410,7 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
         hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
 
         if (SUCCEEDED(hr))
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), streamIndexes.video, pWICBitmap.Get(), frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, frameDuration, rtStart);
     }
 
     if (SUCCEEDED(hr))
@@ -354,7 +422,7 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
             if (FAILED(hr))
                 break;
 
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), streamIndexes.video, pWICBitmap.Get(), frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, frameDuration, rtStart);
             if (FAILED(hr))            
                 break;
         }
