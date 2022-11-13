@@ -241,7 +241,7 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     const UINT32 bitRate = 1000000;
     const GUID encodingFormat = MFVideoFormat_H264;
     const GUID videoFormat = MFVideoFormat_RGB32;
-    const GUID audioFormat = MFAudioFormat_PCM;
+    const GUID audioFormat = MFAudioFormat_AAC;
 
     ComPtr<IMFMediaType> pVideoOut;
     ComPtr<IMFMediaType> pVideoIn;
