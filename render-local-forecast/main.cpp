@@ -243,12 +243,17 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     const GUID videoFormat = MFVideoFormat_RGB32;
     const GUID audioFormat = MFAudioFormat_AAC;
 
+    ComPtr<IMFAttributes> attributes;
     ComPtr<IMFMediaType> pVideoOut;
     ComPtr<IMFMediaType> pVideoIn;
     ComPtr<IMFMediaType> pAudioOut;
     ComPtr<IMFMediaType> pAudioIn;
 
-    HRESULT hr = MFCreateSinkWriterFromURL(pathToMp4Output.c_str(), NULL, NULL, ppSinkWriter);
+    HRESULT hr = MFCreateAttributes(&attributes, 1);
+    if (SUCCEEDED(hr))
+        hr = attributes->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
+    if (SUCCEEDED(hr))
+        hr = MFCreateSinkWriterFromURL(pathToMp4Output.c_str(), NULL, attributes.Get(), ppSinkWriter);
 
     if (SUCCEEDED(hr))
         hr = MFCreateMediaType(&pVideoOut);
