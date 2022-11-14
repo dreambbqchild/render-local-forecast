@@ -77,7 +77,7 @@ HRESULT SelectRandomMusic(IMFSourceReader** pSourceReader)
 
     std::random_device randomDevice;
     std::default_random_engine randomEngine(randomDevice());
-    std::uniform_int_distribution<int> range(0, files.size());
+    std::uniform_int_distribution<int> range(0, files.size() - 1);
     auto index = range(randomEngine);
 
     return MFCreateSourceReaderFromURL(files.at(index).c_str(), NULL, pSourceReader);
