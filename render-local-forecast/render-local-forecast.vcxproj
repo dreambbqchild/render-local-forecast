@@ -193,7 +193,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="FileSystem.cpp" />
+    <ClCompile Include="GifForecast.cpp" />
+    <ClCompile Include="ImageFunctions.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="VideoForecast.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ComInstanceController.h" />
+    <ClInclude Include="FileSystem.h" />
+    <ClInclude Include="ForecastRenderers.h" />
+    <ClInclude Include="ImageFunctions.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
