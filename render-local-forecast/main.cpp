@@ -2,6 +2,7 @@
 #include "ForecastRenderers.h"
 
 #include <wrl.h>
+
 using namespace Microsoft::WRL;
 
 #define INCREMENT_AND_TEST(i, len) i++; \
@@ -15,6 +16,7 @@ int wmain(int argc, const wchar_t* argv[])
         return 1;
 
     std::wstring pathToRenderingsFolder = L".\\renderings";
+    std::wstring pathToForecastsFolder = L".\\forecasts\\hrrr";
     std::wstring pathToMp4Output = L"output.mp4";
     std::wstring pathToGifOutput = L"output.gif";
 
@@ -24,6 +26,11 @@ int wmain(int argc, const wchar_t* argv[])
         {
             INCREMENT_AND_TEST(i, argc);
             pathToRenderingsFolder = argv[i];
+        }
+        if (!wcscmp(L"-f", argv[i]))
+        {
+            INCREMENT_AND_TEST(i, argc);
+            pathToForecastsFolder = argv[i];
         }
         else if (!wcscmp(L"-m", argv[i]))
         {
@@ -48,7 +55,7 @@ int wmain(int argc, const wchar_t* argv[])
         hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pWICFactory));
 
     if (SUCCEEDED(hr))
-        hr = RenderVideoForecast(pathToRenderingsFolder, pathToMp4Output, pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());
+        hr = RenderVideoForecast(pathToRenderingsFolder, pathToForecastsFolder, pathToMp4Output, pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());
 
     /*if (SUCCEEDED(hr))
         hr = RenderGifForecast(pathToGifOutput, pathToRenderingsFolder, pWICFactory.Get(), pD2DFactory.Get(), pDWriteFactory.Get());*/

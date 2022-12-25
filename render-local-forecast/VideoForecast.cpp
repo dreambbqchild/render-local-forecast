@@ -1,6 +1,8 @@
 #include "ForecastRenderers.h"
-#include <wrl.h>
+#include "WxData.h"
 #include <mfapi.h>
+#include <time.h>
+#include <wrl.h>
 
 using namespace Microsoft::WRL;
 using namespace std;
@@ -15,9 +17,15 @@ struct StreamIndexes {
     DWORD audio;
 };
 
-HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, IMFSourceReader** pReader, StreamIndexes* streamIndex, VideoFps fps, UINT32 frameDuration)
+struct TemplateStrings {
+    wstring title, path;
+};
+
+const uint32_t oneHundredNanosecondsInSeconds = 10000000;
+
+HRESULT InitializeSinkWriter(wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, IMFSourceReader** pReader, StreamIndexes* streamIndex, VideoFps fps)
 {
-    const UINT32 bitRate = 1000000;
+    const UINT32 bitRate = imageWidth * imageHeight * 4 * 8;
     const GUID encodingFormat = MFVideoFormat_H264;
     const GUID videoFormat = MFVideoFormat_RGB32;
     const GUID audioFormat = MFAudioFormat_AAC;
@@ -105,7 +113,7 @@ HRESULT InitializeSinkWriter(std::wstring pathToMp4Output, IMFSinkWriter** ppSin
     return hr;
 }
 
-HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, IWICBitmap* pWICBitmap, IMFSourceReader* pReader, StreamIndexes* streamIndex, INT32 frameDuration, LONGLONG& rtStart)
+HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory, IMFSinkWriter* pWriter, IWICBitmap* pWICBitmap, IMFSourceReader* pReader, StreamIndexes* streamIndex, uint32_t frameDuration, LONGLONG& rtStart)
 {
     ComPtr<IWICBitmapLock> pILock;
     ComPtr<IMFMediaBuffer> pBuffer;
@@ -174,31 +182,69 @@ HRESULT RenderSingleVideoForecast(IWICImagingFactory* pWICFactory, ID2D1Factory*
     return hr;
 }
 
-HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pathToMp4Output, IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
+bool TestFileExistsBasedOnTemplate(wstring templatePath, int32_t index) 
 {
-    const VideoFps fps = { 1, 5 };
-    const UINT32 frameDuration = (UINT32)(10 * 1000 * 1000 / (fps.numerator / (float)fps.denominator));
+    struct _stat64i32 buffer;
+    wstring path(templatePath.length() + 32, '\0');
+    swprintf((wchar_t*)path.c_str(), path.length(), templatePath.c_str(), index);
+    return _wstat(path.c_str(), &buffer) == 0;
+}
+
+wstring LocalTimeString(time_t t) 
+{
+    wchar_t strTime[64] = {};
+    struct tm tm = {};
+    localtime_s(&tm, &t);
+    wcsftime(strTime, 64, L"%b %d %Y @ %I %p", &tm);
+    return strTime;
+}
+
+time_t GetGMTTimeForStartOfCurrentHour()
+{
+    struct tm tm = {0};
+    auto now = time(nullptr);
+    gmtime_s(&tm, &now);
+    tm.tm_min = tm.tm_sec = 0;
+    return _mkgmtime(&tm);
+}
+
+HRESULT RenderVideoForecast(wstring pathToRenderingsFolder, wstring pathToForecastsFolder, wstring pathToMp4Output, IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, IDWriteFactory* pDWriteFactory)
+{
+    const uint32_t personalForecastDuration = static_cast<uint32_t>(oneHundredNanosecondsInSeconds * 4);
+    const uint32_t mapFrameDuration = static_cast<uint32_t>(oneHundredNanosecondsInSeconds);
+    VideoFps fps = { 0 };
     ComPtr<IMFSinkWriter> pSinkWriter;
     ComPtr<IMFSourceReader> pReader;
     LONGLONG rtStart = 0;
     StreamIndexes streamIndexes = { 0 };
     HRESULT hr = MFStartup(MF_VERSION);
 
+    MFAverageTimePerFrameToFrameRate(mapFrameDuration, &fps.numerator, &fps.denominator);
+
     if (SUCCEEDED(hr))
-        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &pReader, &streamIndexes, fps, frameDuration);
+        hr = InitializeSinkWriter(pathToMp4Output, &pSinkWriter, &pReader, &streamIndexes, fps);
+
+    if (SUCCEEDED(hr))
+        hr = RenderForecastInit(pWICFactory, pD2DFactory, pDWriteFactory);
 
     if (SUCCEEDED(hr))
     {
         ComPtr<IWICBitmap> pWICBitmap;
-        std::wstring wxFile = pathToRenderingsFolder + L"\\wx.png";
-        hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
+        wstring wxFile = pathToRenderingsFolder + L"\\wx.png";
+        hr = LoadWxBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
 
         if (SUCCEEDED(hr))
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, personalForecastDuration, rtStart);
     }
 
     if (SUCCEEDED(hr))
     {
+        vector<TemplateStrings> templates;
+        auto wxData = GetWxData(pathToForecastsFolder + L"\\forecast.json");
+        int32_t wxDataLength = static_cast<int32_t>(wxData.forecastTime.size());
+        templates.push_back({ L"Temperature on: ", pathToForecastsFolder + L"\\temperature-%03d.png" });
+        templates.push_back({ L"Precipitation on: ", pathToForecastsFolder + L"\\precip-%03d.png" });
+
         for (auto forecastIndex = 0; forecastIndex < totalForecasts; forecastIndex++)
         {
             ComPtr<IWICBitmap> pWICBitmap;
@@ -206,11 +252,45 @@ HRESULT RenderVideoForecast(std::wstring pathToRenderingsFolder, std::wstring pa
             if (FAILED(hr))
                 break;
 
-            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, frameDuration, rtStart);
+            hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, personalForecastDuration, rtStart);
             if (FAILED(hr))
                 break;
         }
+
+        auto now = GetGMTTimeForStartOfCurrentHour();
+        for (auto currentTemplate : templates)
+        {
+            if (FAILED(hr))
+                break;
+
+            for (int32_t overlayIndex = 0, forecastIndex = 0; forecastIndex < wxDataLength; overlayIndex++)
+            {
+                if (!TestFileExistsBasedOnTemplate(currentTemplate.path, overlayIndex))
+                    continue;
+                   
+                auto forecastTime = wxData.forecastTime.at(forecastIndex);
+                if (forecastTime < now)
+                {
+                    forecastIndex++;
+                    continue;
+                }
+
+                ComPtr<IWICBitmap> pWICBitmap;
+                auto title = currentTemplate.title + LocalTimeString(wxData.forecastTime.at(forecastIndex));
+                hr = RenderForecastMapBitmap(title, currentTemplate.path, overlayIndex, wxData.locations, forecastIndex, pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap);
+                if (FAILED(hr))
+                    break;
+
+                hr = RenderSingleVideoForecast(pWICFactory, pD2DFactory, pDWriteFactory, pSinkWriter.Get(), pWICBitmap.Get(), pReader.Get(), &streamIndexes, mapFrameDuration, rtStart);
+                if (FAILED(hr))
+                    break;
+
+                forecastIndex++;
+            }
+        }
     }
+
+    RenderForecastFree();
 
     if (SUCCEEDED(hr))
         hr = pSinkWriter->Finalize();

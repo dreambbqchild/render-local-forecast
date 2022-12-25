@@ -9,32 +9,53 @@ using namespace Microsoft::WRL;
 using namespace std;
 namespace fs = std::filesystem;
 
-HRESULT LoadBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, std::wstring path, IWICBitmap** ppWICBitmap)
+HRESULT LoadD2DBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, std::wstring path, ID2D1Bitmap** ppD2DBitmap)
 {
-    ComPtr<ID2D1RenderTarget> pRenderTarget;
-    ComPtr<IWICFormatConverter> pConverter;
     ComPtr<IWICBitmapDecoder> pDecoder;
     ComPtr<IWICBitmapFrameDecode> pSource;
-    ComPtr<ID2D1Bitmap> pD2DBitmap;
+    ComPtr<IWICFormatConverter> pConverter;
+    ComPtr<IWICBitmap> pWicBitmap;
+    ComPtr<ID2D1RenderTarget> pRenderTarget;
+    UINT width = 0, height = 0;
 
     HRESULT hr = pWICFactory->CreateDecoderFromFilename(path.c_str(), NULL, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &pDecoder);
+
     if (SUCCEEDED(hr))
         hr = pDecoder->GetFrame(0, &pSource);
+
+    if (SUCCEEDED(hr))
+        hr = pSource->GetSize(&width, &height);
 
     if (SUCCEEDED(hr))
         hr = pWICFactory->CreateFormatConverter(&pConverter);
 
     if (SUCCEEDED(hr))
         hr = pConverter->Initialize(pSource.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, NULL, 0.f, WICBitmapPaletteTypeMedianCut);
+    
+    if (SUCCEEDED(hr))
+        hr = pWICFactory->CreateBitmap(width, height, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, &pWicBitmap);
 
     if (SUCCEEDED(hr))
-        hr = pWICFactory->CreateBitmap(imageWidth, imageHeight, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, ppWICBitmap);
+        hr = pD2DFactory->CreateWicBitmapRenderTarget(pWicBitmap.Get(), D2D1::RenderTargetProperties(), &pRenderTarget);
+
+    if (SUCCEEDED(hr))
+        hr = pRenderTarget->CreateBitmapFromWicBitmap(pConverter.Get(), ppD2DBitmap);
+
+    return hr;
+}
+
+HRESULT LoadWxBitmapFromFile(IWICImagingFactory* pWICFactory, ID2D1Factory* pD2DFactory, std::wstring path, IWICBitmap** ppWICBitmap)
+{
+    ComPtr<ID2D1RenderTarget> pRenderTarget;
+    ComPtr<ID2D1Bitmap> pD2DBitmap;    
+
+    HRESULT hr = pWICFactory->CreateBitmap(imageWidth, imageHeight, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, ppWICBitmap);
 
     if (SUCCEEDED(hr))
         hr = pD2DFactory->CreateWicBitmapRenderTarget(*ppWICBitmap, D2D1::RenderTargetProperties(), &pRenderTarget);
 
     if (SUCCEEDED(hr))
-        hr = pRenderTarget->CreateBitmapFromWicBitmap(pConverter.Get(), &pD2DBitmap);
+        hr = LoadD2DBitmapFromFile(pWICFactory, pD2DFactory, path, &pD2DBitmap);
 
     if (SUCCEEDED(hr))
     {

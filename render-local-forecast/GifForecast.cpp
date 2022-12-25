@@ -58,7 +58,7 @@ HRESULT RenderGifForecast(std::wstring pathToGifOutput, std::wstring pathToRende
             if (i == -1)
             {
                 std::wstring wxFile = pathToRenderingsFolder + L"\\wx.png";
-                hr = LoadBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
+                hr = LoadWxBitmapFromFile(pWICFactory, pD2DFactory, wxFile, &pWICBitmap);
             }
             else
                 hr = RenderForecastBitmap(pathToRenderingsFolder, pWICFactory, pD2DFactory, pDWriteFactory, &pWICBitmap, i);
