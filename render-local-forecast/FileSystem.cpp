@@ -89,19 +89,34 @@ std::wstring GetTextForecast(std::wstring pathToRenderingsFolder, int index)
 
 HRESULT SelectRandomMusic(IMFSourceReader** pSourceReader)
 {
+    struct tm now;
+    auto tNow = time(nullptr);
+    localtime_s(&now, &tNow);
+
     std::wstring path(MAX_PATH, '\0');
     GetModuleFileName(NULL, (wchar_t*)path.c_str(), MAX_PATH);
     path = fs::path(path).parent_path().parent_path().parent_path();
     path += L"\\music";
+    wstring song;
 
-    std::vector<fs::path> files;
-    for (const auto& entry : fs::directory_iterator(path))
-        files.push_back(entry.path());
+    if (now.tm_mon == 11 && now.tm_mday == 25)
+    {
+        song = path / fs::path(L"__deadly.m4a");
+    }
+    else
+    {
+        std::vector<fs::path> files;
+        for (const auto& entry : fs::directory_iterator(path))
+        {
+            if (entry.path().filename().string().find("__") == string::npos)
+                files.push_back(entry.path());
+        }
 
-    std::random_device randomDevice;
-    std::default_random_engine randomEngine(randomDevice());
-    std::uniform_int_distribution<int> range(0, files.size() - 1);
-    auto index = range(randomEngine);
-
-    return MFCreateSourceReaderFromURL(files.at(index).c_str(), NULL, pSourceReader);
+        std::random_device randomDevice;
+        std::default_random_engine randomEngine(randomDevice());
+        std::uniform_int_distribution<int> range(0, files.size() - 1);
+        auto index = range(randomEngine);
+        song = files.at(index);
+    }
+    return MFCreateSourceReaderFromURL(song.c_str(), NULL, pSourceReader);
 }
