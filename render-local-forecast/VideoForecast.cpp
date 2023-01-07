@@ -25,7 +25,7 @@ const uint32_t oneHundredNanosecondsInSeconds = 10000000;
 
 HRESULT InitializeSinkWriter(wstring pathToMp4Output, IMFSinkWriter** ppSinkWriter, IMFSourceReader** pReader, StreamIndexes* streamIndex, VideoFps fps)
 {
-    const UINT32 bitRate = imageWidth * imageHeight * 4 * 8;
+    const UINT32 bitRate = imageWidth * imageHeight * 4 * 8; //This is only right in my use case as it results in large files.
     const GUID encodingFormat = MFVideoFormat_H264;
     const GUID videoFormat = MFVideoFormat_RGB32;
     const GUID audioFormat = MFAudioFormat_AAC;
